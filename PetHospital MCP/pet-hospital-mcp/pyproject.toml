@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pet-hospital-mcp"
+version = "0.1.0"
+description = "Stateless MCP server (protocol 2026-07-28) exposing the Go Pet Hospital REST API to AI agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+# `mcp==2.0.0` is the official Python SDK 2.x. It is pinned exactly: this
+# service depends on 2.x-only API surface (`MCPServer`, stateless Streamable
+# HTTP, `resultType`) that does not exist in the 1.x FastMCP line.
+dependencies = [
+    "mcp==2.0.0",
+    "httpx>=0.28,<0.29",
+    "pydantic>=2.12,<3",
+    "starlette>=0.27",
+    "uvicorn>=0.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+pet-hospital-mcp = "pet_hospital_mcp.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Makes `import pet_hospital_mcp` work straight from a checkout, with or
+# without an editable install.
+pythonpath = ["src"]
+# `asyncio_mode = auto` lets the async tests run without decorating every one.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error::DeprecationWarning:pet_hospital_mcp.*"]

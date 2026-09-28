@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>AnythingLLM 文档上传</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg, #eaf7ee 0%, #dbf1e3 55%, #cfe9d9 100%);
+    color: #1f3a2a; padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 560px; padding: 32px;
+    background: rgba(255,255,255,.78); border: 1px solid rgba(47,125,81,.16);
+    border-radius: 20px; backdrop-filter: blur(16px);
+    box-shadow: 0 20px 46px rgba(31,81,54,.14);
+  }
+  h1 { margin: 0 0 6px; font-size: 20px; letter-spacing: .3px; }
+  .sub { margin: 0 0 24px; font-size: 13px; color: #6b8a79; }
+  .sub b { color: #2f7d51; font-weight: 600; }
+
+  #key {
+    width: 100%; padding: 10px 12px; margin-bottom: 14px; font-size: 13px;
+    font-family: inherit; color: #1f3a2a; background: rgba(255,255,255,.7);
+    border: 1px solid rgba(47,125,81,.28); border-radius: 10px; transition: .2s;
+  }
+  #key:focus { outline: none; border-color: #3f9d6b; box-shadow: 0 0 0 3px rgba(63,157,107,.14); }
+  #key::placeholder { color: #9db4a8; }
+
+  #drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    padding: 34px 20px; border: 2px dashed rgba(47,125,81,.35); border-radius: 14px;
+    cursor: pointer; transition: .2s; text-align: center;
+  }
+  #drop:hover, #drop.over { border-color: #3f9d6b; background: rgba(63,157,107,.08); }
+  #drop .icon { font-size: 30px; }
+  #drop .hint { font-size: 13px; color: #6b8a79; }
+  #drop .name { font-size: 14px; font-weight: 600; color: #1f5136; word-break: break-all; }
+  #drop.has-file { border-style: solid; border-color: rgba(63,157,107,.6); background: rgba(63,157,107,.08); }
+
+  button {
+    width: 100%; margin-top: 18px; padding: 13px; border: 0; border-radius: 12px;
+    font-size: 15px; font-weight: 600; color: #fff; cursor: pointer; transition: .2s;
+    background: linear-gradient(90deg, #3f9d6b, #2f8a63);
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  #steps { margin-top: 22px; display: none; }
+  #steps.on { display: block; }
+  .step { display: flex; align-items: center; gap: 10px; font-size: 13.5px; padding: 7px 0; color: #93aa9e; }
+  .step .dot {
+    width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2px solid currentColor;
+    display: flex; align-items: center; justify-content: center; font-size: 11px;
+  }
+  .step.active { color: #2f7d51; }
+  .step.active .dot { border-color: #3f9d6b; animation: pulse 1s infinite; }
+  .step.done { color: #1f8a4c; }
+  .step.done .dot { border-color: #1f8a4c; background: rgba(31,138,76,.12); }
+  .step.fail { color: #c0483f; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(63,157,107,.18); } }
+
+  #msg { margin-top: 14px; font-size: 12.5px; color: #6b8a79; word-break: break-all; line-height: 1.6; }
+  #msg.err { color: #b4413a; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📄 文档上传 · 向量化</h1>
+  <p class="sub">上传至工作区 <b id="ws">读取中…</b></p>
+
+  <input type="password" id="key" placeholder="AnythingLLM API Key（只存在本机浏览器里）" autocomplete="off">
+  <p class="sub" style="margin:-8px 0 14px;font-size:12px;">在 AnythingLLM「设置 → API Keys」生成，填入后自动记住。</p>
+
+  <div id="drop">
+    <div class="icon">🌿</div>
+    <div class="name" id="fname">点击选择文件，或拖拽到此处</div>
+    <div class="hint" id="fhint">支持 txt / pdf / docx / md 等</div>
+  </div>
+  <input type="file" id="file" hidden>
+
+  <button id="go" disabled>开始上传并向量化</button>
+
+  <div id="steps">
+    <div class="step" id="s1"><span class="dot">1</span>获取第一个工作区</div>
+    <div class="step" id="s2"><span class="dot">2</span>上传文档到服务器</div>
+    <div class="step" id="s3"><span class="dot">3</span>嵌入向量库</div>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<script>
+const BASE = "http://localhost:3001/api/v1";
+const LS_KEY = "anythingllm_api_key";
+let KEY = localStorage.getItem(LS_KEY) || "";
+const H = () => ({ Authorization: "Bearer " + KEY });
+const $ = id => document.getElementById(id);
+const drop = $("drop"), fileInput = $("file"), go = $("go"), msg = $("msg");
+const keyInput = $("key");
+keyInput.value = KEY;
+
+const setStep = (id, cls) => {
+  const el = $(id);
+  el.className = "step" + (cls ? " " + cls : "");
+  el.querySelector(".dot").textContent = cls === "done" ? "✓" : cls === "fail" ? "!" : id[1];
+};
+const say = (t, err) => { msg.textContent = t; msg.className = err ? "err" : ""; };
+
+// 读取第一个工作区；key 变了要重新跑一次
+async function loadWorkspace() {
+  if (!KEY) { $("ws").textContent = "待填写 API Key"; return; }
+  try {
+    const ws = (await (await fetch(BASE + "/workspaces", { headers: H() })).json()).workspaces[0];
+    if (!ws) throw new Error("没有工作区");
+    $("ws").textContent = ws.name;
+    $("ws").dataset.slug = ws.slug;
+    say("");
+  } catch (e) {
+    $("ws").textContent = "连接失败";
+    say("无法连接 AnythingLLM：" + e.message, true);
+  }
+}
+
+// key 只存本机浏览器，不进页面源码
+keyInput.onchange = () => {
+  KEY = keyInput.value.trim();
+  localStorage.setItem(LS_KEY, KEY);
+  delete $("ws").dataset.slug;
+  loadWorkspace();
+};
+
+loadWorkspace();
+
+// 文件选择
+function pick(f) {
+  if (!f) return;
+  window._file = f;
+  drop.classList.add("has-file");
+  $("fname").textContent = f.name;
+  $("fhint").textContent = (f.size / 1024).toFixed(1) + " KB";
+  go.disabled = false;
+  say("");
+}
+drop.onclick = () => fileInput.click();
+fileInput.onchange = () => pick(fileInput.files[0]);
+["dragover", "dragenter"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => pick(e.dataTransfer.files[0]));
+
+// 主流程
+go.onclick = async () => {
+  const f = window._file, slug = $("ws").dataset.slug;
+  if (!KEY) return say("请先填写 API Key", true);
+  if (!f) return say("请先选择文件", true);
+  if (!slug) return say("工作区未就绪", true);
+  go.disabled = true;
+  $("steps").classList.add("on");
+  ["s1", "s2", "s3"].forEach(s => setStep(s, ""));
+  say("处理中…");
+
+  try {
+    setStep("s1", "active");
+    await new Promise(r => setTimeout(r, 150));
+    setStep("s1", "done");
+
+    setStep("s2", "active");
+    const fd = new FormData();
+    fd.append("file", f);
+    const up = await (await fetch(BASE + "/document/upload", { method: "POST", headers: H(), body: fd })).json();
+    if (!up.success) throw new Error(JSON.stringify(up.error || up));
+    const loc = up.documents[0].location;
+    setStep("s2", "done");
+    say("已上传：" + loc);
+
+    setStep("s3", "active");
+    const em = await (await fetch(BASE + "/workspace/" + slug + "/update-embeddings", {
+      method: "POST",
+      headers: { ...H(), "Content-Type": "application/json" },
+      body: JSON.stringify({ adds: [loc] })
+    })).json();
+    if (em.error) throw new Error(em.error);
+    setStep("s3", "done");
+    say("✅ 完成！《" + f.name + "》已上传并完成向量化嵌入。");
+  } catch (e) {
+    const cur = ["s1", "s2", "s3"].find(s => $(s).classList.contains("active"));
+    if (cur) setStep(cur, "fail");
+    say("❌ 失败：" + e.message, true);
+    go.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
